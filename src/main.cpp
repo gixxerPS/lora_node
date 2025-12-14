@@ -1,7 +1,13 @@
+#include <Arduino.h>           // NEU: unbedingt als erstes
+
 #define HELTEC_WIRELESS_STICK_LITE
 #include <heltec_unofficial.h>
 
+unsigned long lastTx = 0;
+
 void setup() {
+  // Serial.begin(115200); -> macht heltec_setup()
+
   heltec_setup();  // initialisiert Pins, RF-Switch, Serial
   RADIOLIB_OR_HALT(
     radio.begin(
@@ -15,43 +21,44 @@ void setup() {
     )
   );
 
-  radio.setCRC(true); 
-  radio.setIQ(false);
+  RADIOLIB_OR_HALT(radio.setCRC(true));
+  RADIOLIB_OR_HALT(radio.invertIQ(false));
 }
 
 void loop() {
-  RADIOLIB(radio.transmit("test"));
-  delay(1000);
-  heltec_loop();   // hält Button-/Power-Logic am Leben
+  static uint16_t data = 0;
+  if (millis() - lastTx > 2000) {
+    lastTx = millis();
+
+    String msg = "test " + String(data++);
+
+    int txState = radio.transmit(msg.c_str());   // blocking
+    Serial.println("TX ("+String(txState) + "): " + msg);
+  }
+
+  // --- Empfangen (alles was reinkommt printen) ---
+  // kurze Timeout-Zeit, damit loop nicht ewig blockiert
+  uint8_t buf[256];
+  int16_t state = radio.receive(buf, sizeof(buf), 50);  // 50 ms timeout
+
+  if (state == RADIOLIB_ERR_NONE) {
+    // Länge bestimmen (RadioLib nutzt 0-terminiert für Strings hier meist nicht)
+    // -> simplest: alles als C-String behandeln, abschließen
+    size_t len = radio.getPacketLength();
+    if (len > sizeof(buf) - 1) {
+      len = sizeof(buf) - 1;
+    }
+    buf[len] = '\0';
+
+    Serial.print("RX: ");
+    Serial.println((char*)buf);
+    Serial.print("RSSI: ");
+    Serial.println(radio.getRSSI());
+    Serial.print("SNR: ");
+    Serial.println(radio.getSNR());
+  }
+
+  // ein paar Millisekunden Luft lassen
+  delay(5);
 }
 
-
-// #include <heltec_unofficial.h>
-// #include <RadioLib.h>
-
-// void setup() {
-//   heltec_setup();                       // setzt u.a. ANT_SW_CTRL korrekt (V3)
-//   SPIClass spi(FSPI);
-//   spi.begin(9, 11, 10, 8);              // SCK,MISO,MOSI,SS  -> GPIO9,11,10,8
-//   static SX1262 radio = new Module(8,   // NSS
-//                                    14,  // DIO1
-//                                    12,  // RESET
-//                                    13,  // BUSY
-//                                    spi);
-
-//   RADIOLIB_OR_HALT(radio.begin(868.100));    // oder exakt 868.125, aber identisch zum Pi
-//   RADIOLIB_OR_HALT(radio.setBandwidth(125.0));
-//   RADIOLIB_OR_HALT(radio.setSpreadingFactor(7));
-//   RADIOLIB_OR_HALT(radio.setCodingRate(5));      // 4/5
-//   RADIOLIB_OR_HALT(radio.setPreambleLength(8));
-//   RADIOLIB_OR_HALT(radio.setSyncWord(0x12));
-//   RADIOLIB_OR_HALT(radio.setCRC(true));
-//   RADIOLIB_OR_HALT(radio.setIQ(false));
-//   RADIOLIB_OR_HALT(radio.setOutputPower(10));    // 10–14 dBm
-// }
-
-// void loop() {
-//   RADIOLIB(radio.transmit("test"));
-//   delay(5000); // Duty-Cycle im 1%-Band beachten
-//   heltec_loop();
-// }
